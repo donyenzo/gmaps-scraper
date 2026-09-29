@@ -3,6 +3,9 @@
  * Pure logic (no HTTP, no Next.js) — dapat di-import oleh route dan test.
  */
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
 export interface Job {
   query: string;
   location: string;
@@ -33,7 +36,7 @@ export interface Place {
   openNow: boolean | null;
   priceLevel: string;
   thumbnailUrl: string;
-  openingHours: string[];
+  openingHours: string[];   // FIX: field baru — jam operasional
   query: string;
   location: string;
 }
@@ -49,6 +52,9 @@ export interface FetchResult {
   fromCache: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LIMITS  (shared antara route dan validator)
+// ─────────────────────────────────────────────────────────────────────────────
 export const LIMITS = {
   MAX_JOBS:     20,
   MAX_PAGES:    10,
@@ -58,6 +64,9 @@ export const LIMITS = {
   MAX_KEY_LEN: 128,
 } as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SEMAPHORE — batasi jumlah job paralel
+// ─────────────────────────────────────────────────────────────────────────────
 export class Semaphore {
   private n: number;
   private readonly q: Array<() => void> = [];
@@ -84,6 +93,9 @@ export class Semaphore {
   get available() { return this.n; }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KEY ROTATOR
+// ─────────────────────────────────────────────────────────────────────────────
 export class KeyRotator {
   private readonly keys: string[];
   private idx = 0;
@@ -98,6 +110,7 @@ export class KeyRotator {
     const active = this.keys.filter(k => !this.failed.has(k));
     if (!active.length) throw new Error("Semua API key gagal.");
     const key = active[this.idx % active.length];
+    // FIX: reset idx agar tidak overflow Number.MAX_SAFE_INTEGER
     this.idx = (this.idx + 1) % 1_000_000;
     return key;
   }
@@ -109,6 +122,11 @@ export class KeyRotator {
   get totalCount() { return this.keys.length; }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// IN-MEMORY CACHE dengan TTL
+// FIX: query yang sama tidak di-fetch ulang dalam window TTL
+// Catatan: reset saat Vercel cold start. Untuk persistence → ganti Vercel KV.
+// ─────────────────────────────────────────────────────────────────────────────
 interface CacheEntry { data: unknown[]; exp: number; }
 const _cache = new Map<string, CacheEntry>();
 const CACHE_MAX = 200;
@@ -119,6 +137,7 @@ export const CACHE_TTL_MS =
 export function cacheKey(
   q: string, loc: string, start: number, gl: string, hl: string
 ): string {
+  // FIX: trim setiap segment secara individual, bukan keseluruhan string
   return [q, loc, String(start), gl, hl]
     .map(s => s.trim().toLowerCase())
     .join("|");
@@ -133,6 +152,7 @@ export function cacheGet(key: string): unknown[] | null {
 
 export function cacheSet(key: string, data: unknown[]): void {
   if (_cache.size >= CACHE_MAX) {
+    // Evict entry dengan expiry paling awal
     let earliest = Infinity, evictKey = "";
     for (const [k, v] of _cache) {
       if (v.exp < earliest) { earliest = v.exp; evictKey = k; }
@@ -145,6 +165,9 @@ export function cacheSet(key: string, data: unknown[]): void {
 export function cacheClear() { _cache.clear(); }
 export function cacheSize()  { return _cache.size; }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUT VALIDATION
+// ─────────────────────────────────────────────────────────────────────────────
 export function validate(raw: unknown): ValidationResult {
   if (!raw || typeof raw !== "object")
     return { ok: false, error: "Request body tidak valid" };
@@ -195,7 +218,13 @@ export function validate(raw: unknown): ValidationResult {
   return { ok: true, data: { jobs, apiKeys, gl, hl, num } };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PARSE  Serper response item → Place
+// FIX: dedup key fallback pakai title+address bukan hanya title
+// FIX: capture openingHours + thumbnailUrl yang sebelumnya terbuang
+// ─────────────────────────────────────────────────────────────────────────────
 export function parsePlaceItem(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   item: any,
   query: string,
   location: string
@@ -219,8 +248,8 @@ export function parsePlaceItem(
       : cid ? `https://www.google.com/maps?cid=${cid}` : "",
     openNow:      typeof item.openNow === "boolean" ? item.openNow : null,
     priceLevel:   String(item.priceLevel  ?? ""),
-    thumbnailUrl: String(item.thumbnailUrl ?? ""),
-    openingHours: Array.isArray(item.openingHours)
+    thumbnailUrl: String(item.thumbnailUrl ?? ""),                   // FIX: field baru
+    openingHours: Array.isArray(item.openingHours)                   // FIX: field baru
       ? item.openingHours.map(String)
       : [],
     query,
@@ -228,6 +257,13 @@ export function parsePlaceItem(
   };
 }
 
+/**
+ * Hasilkan dedup key yang aman:
+ * 1. placeId  → paling unik
+ * 2. cid      → unik per listing Google
+ * 3. title+address[:30]  → FIX: lebih aman dari sekedar title
+ *    "Restoran Padang" di Jakarta ≠ "Restoran Padang" di Bali
+ */
 export function dedupKey(item: Place): string {
   if (item.placeId) return `pid:${item.placeId}`;
   if (item.cid)     return `cid:${item.cid}`;
@@ -235,12 +271,17 @@ export function dedupKey(item: Place): string {
   return `ttl:${item.title.toLowerCase()}|${addr}`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FETCH ONE PAGE dari Serper Maps API (dengan cache)
+// FIX: return errMsg penuh dari Serper, bukan hanya HTTP status
+// ─────────────────────────────────────────────────────────────────────────────
 export async function fetchPage(
   q: string, loc: string, start: number,
   apiKey: string, gl: string, hl: string, num: number
 ): Promise<FetchResult> {
   const key = cacheKey(q, loc, start, gl, hl);
 
+  // Cache hit — hemat kuota Serper
   const cached = cacheGet(key);
   if (cached) return { places: cached, status: 200, errMsg: "", fromCache: true };
 
@@ -255,16 +296,17 @@ export async function fetchPage(
   });
 
   if (!resp.ok) {
+    // FIX: ambil pesan error ASLI dari Serper, bukan hanya kode HTTP
     let errMsg = `HTTP ${resp.status}`;
     try {
       const body = await resp.json();
       errMsg = body?.message ?? body?.error ?? body?.msg ?? errMsg;
-    } catch { }
+    } catch { /* biarkan default */ }
     return { places: [], status: resp.status, errMsg, fromCache: false };
   }
 
   const data   = await resp.json();
   const places = data.places ?? [];
-  cacheSet(key, places);
+  cacheSet(key, places); // simpan ke cache
   return { places, status: 200, errMsg: "", fromCache: false };
 }

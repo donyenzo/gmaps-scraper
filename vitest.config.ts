@@ -7,7 +7,7 @@ export default defineConfig({
     include: ["__tests__/**/*.test.ts"],
     coverage: {
       reporter: ["text", "html"],
-      include: ["lib/**/*.ts"],
+      include:  ["lib/**/*.ts"],
     },
   },
 });

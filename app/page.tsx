@@ -38,7 +38,12 @@ function sortIcon(activeKey: keyof Place, col: keyof Place, dir: 1 | -1): string
 function toCSV(rows: Place[]): string {
   if (!rows.length) return "";
   const keys = Object.keys(rows[0]) as (keyof Place)[];
-  const esc  = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = (v: unknown): string => {
+    const s = String(v ?? "");
+    if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r"))
+      return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
   return [keys.join(","), ...rows.map(r => keys.map(k => esc(r[k])).join(","))].join("\n");
 }
 
@@ -62,7 +67,7 @@ function lsDel(key: string) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SMALL SUB-COMPONENTS  (di luar Home — stabil, tidak re-mount setiap render)
-// ──────────────────────────────────────────────��──────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 function Badge({ children, color = "blue" }: { children: React.ReactNode; color?: string }) {
   const cls: Record<string, string> = {
     blue:  "bg-[#1f6feb1a]  text-[#58a6ff]  border-[#1f6feb33]",
@@ -213,6 +218,7 @@ function ScraperApp() {
   const logRef     = useRef<HTMLDivElement>(null);
   const abortRef   = useRef<AbortController | null>(null);
   const mapRef     = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstRef = useRef<any>(null);
   const perPage    = 20;
 
@@ -329,6 +335,7 @@ function ScraperApp() {
   };
 
   const startScraping = async () => {
+    // Validasi dengan feedback
     if (!apiKeys.length) {
       addToast("error", "Tambahkan minimal 1 API key Serper.dev terlebih dahulu");
       return;
@@ -425,7 +432,7 @@ function ScraperApp() {
                 addLog(`🎉 SELESAI! ${ev.total} tempat unik`);
                 addToast("success", `Selesai! ${ev.total} tempat unik ditemukan`);
                 setProgress(p => ({ ...p, phase: "done", jobIndex: p.totalJobs }));
-                sendBrowserNotif(ev.total);
+                sendBrowserNotif(ev.total);   // notif browser jika izin sudah diberikan
                 break;
               case "error":
               case "fatal":
@@ -476,7 +483,7 @@ function ScraperApp() {
 
   const exportCSV  = () => download(toCSV(places),  `gmaps_${tsFile()}.csv`,  "text/csv;charset=utf-8");
   const exportJSON = () => download(JSON.stringify(places, null, 2), `gmaps_${tsFile()}.json`, "application/json");
-
+  // ── Browser notifications ──────────────────────────────────────────────────
   const requestNotifPermission = async () => {
     if (!("Notification" in window)) { setNotifPerm("unsupported"); return; }
     const perm = await Notification.requestPermission();
@@ -494,6 +501,7 @@ function ScraperApp() {
     });
   };
 
+  // ── Google Sheets export ───────────────────────────────────────────────────
   const exportToSheets = async () => {
     if (!places.length) return;
     const csv = toCSV(places);
@@ -505,6 +513,7 @@ function ScraperApp() {
     }
   };
 
+  // ── Leaflet map loader ─────────────────────────────────────────────────────
   useEffect(() => {
     if (viewMode !== "map") return;
     const container = mapRef.current;
@@ -514,6 +523,8 @@ function ScraperApp() {
     if (!validPlaces.length) return;
 
     const loadLeaflet = async () => {
+      // Cek apakah Leaflet sudah dimuat
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const w = window as any;
       if (!w.L) {
         await new Promise<void>((res, rej) => {
@@ -533,6 +544,7 @@ function ScraperApp() {
       }
 
       const L = w.L;
+      // Hapus instance lama
       if (mapInstRef.current) { mapInstRef.current.remove(); mapInstRef.current = null; }
 
       const map = L.map(container).setView(
@@ -567,18 +579,26 @@ function ScraperApp() {
     return () => {
       if (mapInstRef.current) { mapInstRef.current.remove(); mapInstRef.current = null; }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, places.length]);
 
+  // ── TABLE COLUMNS CONFIG ────────────────────────────────────────────────────
   const COLS: [keyof Place, string][] = [
     ["title", "Nama"], ["category", "Kategori"], ["address", "Alamat"],
     ["phone", "Telepon"], ["rating", "Rating"], ["ratingCount", "Reviews"],
     ["website", "Website"],
   ];
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen">
+
+      {/* ── Toast ─────────────────────────────────────────────────────────── */}
       <ToastList toasts={toasts} onDismiss={dismissToast} />
 
+      {/* ── Header ────────────────────────────────────────────────────────── */}
       <header className="border-b border-[#30363d] px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3 justify-between">
         <div className="flex items-center gap-3">
           <span className="text-xl">🗺️</span>
@@ -597,6 +617,7 @@ function ScraperApp() {
         </div>
       </header>
 
+      {/* ── Session restore banner ──────────────────────────────────────── */}
       {sessionBanner > 0 && places.length === 0 && (
         <div className="bg-[#1f6feb]/10 border-b border-[#1f6feb]/20 px-4 sm:px-6 py-2.5
                         flex flex-wrap items-center gap-3 text-xs">
@@ -610,8 +631,13 @@ function ScraperApp() {
         </div>
       )}
 
+      {/* ── Main layout: mobile=column, desktop=row ─────────────────────── */}
       <div className="flex flex-col lg:flex-row gap-4 p-4 max-w-[1600px] mx-auto">
+
+        {/* ════ LEFT PANEL ════════════════════════════════════════════════ */}
         <aside className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col gap-4">
+
+          {/* Auth Token */}
           <div className="card p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-[#e6edf3]">🔐 Auth Token</h2>
@@ -643,6 +669,7 @@ function ScraperApp() {
             )}
           </div>
 
+          {/* API Keys */}
           <div className="card p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-[#e6edf3]">🔑 API Keys</h2>
@@ -672,6 +699,7 @@ function ScraperApp() {
             )}
           </div>
 
+          {/* Job Queue */}
           <div className="card p-4">
             <h2 className="text-sm font-semibold text-[#e6edf3] mb-3">📋 Job Queue</h2>
             <div className="space-y-2">
@@ -732,6 +760,7 @@ function ScraperApp() {
             )}
           </div>
 
+          {/* Settings */}
           <div className="card p-4">
             <h2 className="text-sm font-semibold text-[#e6edf3] mb-3">⚙️ Pengaturan</h2>
             <div className="grid grid-cols-3 gap-2">
@@ -758,9 +787,11 @@ function ScraperApp() {
             </div>
           </div>
 
+          {/* Start / Stop */}
           {running ? (
             <button onClick={stopScraping}
-                    className="w-full py-3 text-base font-semibold rounded-md text-white bg-[#da3633] hover:bg-[#f85149] transition-colors">
+                    className="w-full py-3 text-base font-semibold rounded-md text-white
+                               bg-[#da3633] hover:bg-[#f85149] transition-colors">
               ⏹ Stop Scraping
             </button>
           ) : (
@@ -770,6 +801,7 @@ function ScraperApp() {
                       className="btn-primary w-full py-3 text-base">
                 🚀 Mulai Scraping
               </button>
+              {/* Validation hint — visible reason why button is disabled */}
               {(!apiKeys.length || !jobs.length) && (
                 <p className="text-[#484f58] text-xs text-center -mt-1">
                   {!apiKeys.length && !jobs.length
@@ -782,7 +814,10 @@ function ScraperApp() {
           )}
         </aside>
 
+        {/* ════ RIGHT PANEL ═══════════════════════════════════════════════ */}
         <main className="flex-1 min-w-0 flex flex-col gap-4">
+
+          {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
             {[
               { label: "Total Tempat",   value: places.length,   color: "text-[#58a6ff]" },
@@ -796,8 +831,10 @@ function ScraperApp() {
             ))}
           </div>
 
+          {/* Progress bar */}
           <ProgressBar progress={progress} />
 
+          {/* Log */}
           <div className="card p-3">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-semibold text-[#e6edf3]">📡 Log Real-time</h2>
@@ -807,7 +844,8 @@ function ScraperApp() {
               </button>
             </div>
             <div ref={logRef}
-                 className="bg-[#0d1117] rounded font-mono text-xs text-[#8b949e] p-3 h-32 overflow-y-auto">
+                 className="bg-[#0d1117] rounded font-mono text-xs text-[#8b949e]
+                            p-3 h-32 overflow-y-auto">
               {logs.length === 0
                 ? <span className="text-[#484f58]">Log akan muncul saat scraping dimulai...</span>
                 : logs.map((l, i) => (
@@ -821,8 +859,11 @@ function ScraperApp() {
             </div>
           </div>
 
+          {/* Table */}
           <div className="card flex-1 flex flex-col overflow-hidden">
+            {/* Toolbar */}
             <div className="flex flex-wrap items-center gap-2 p-3 border-b border-[#30363d]">
+              {/* Tab selector */}
               <div className="flex rounded-md overflow-hidden border border-[#30363d] text-xs">
                 {(["table","map"] as const).map(mode => (
                   <button key={mode}
@@ -836,6 +877,7 @@ function ScraperApp() {
                   </button>
                 ))}
               </div>
+              {/* Filter (table only) */}
               {viewMode === "table" && (
                 <input className="input max-w-xs"
                   placeholder="🔍 Filter nama / alamat / kategori..."
@@ -849,6 +891,7 @@ function ScraperApp() {
                         title="Salin CSV ke clipboard untuk import ke Google Sheets">
                   📊 Sheets
                 </button>
+                {/* Notifikasi */}
                 <button onClick={requestNotifPermission}
                         title={notifPerm === "granted" ? "Notifikasi aktif" : "Aktifkan notifikasi browser"}
                         className={`btn-secondary ${notifPerm === "granted" ? "text-[#3fb950]" : ""}`}>
@@ -863,6 +906,7 @@ function ScraperApp() {
               </div>
             </div>
 
+            {/* FIX: overflow-x-auto untuk mobile + min-w agar tidak squish */}
             <div className={`overflow-x-auto flex-1 ${viewMode === "map" ? "hidden" : ""}`}>
               <table className="w-full text-xs border-collapse min-w-[720px]">
                 <thead className="sticky top-0 bg-[#161b22] z-10">
@@ -871,7 +915,8 @@ function ScraperApp() {
                     {COLS.map(([k, label]) => (
                       <th key={k}
                           onClick={() => doSort(k)}
-                          className="text-left px-3 py-2 text-[#8b949e] font-medium cursor-pointer hover:text-[#c9d1d9] whitespace-nowrap select-none">
+                          className="text-left px-3 py-2 text-[#8b949e] font-medium cursor-pointer
+                                     hover:text-[#c9d1d9] whitespace-nowrap select-none">
                         {label}{sortIcon(sortKey, k, sortDir)}
                       </th>
                     ))}
@@ -938,6 +983,7 @@ function ScraperApp() {
               </table>
             </div>
 
+            {/* Map view */}
             {viewMode === "map" && (
               <div className="flex-1 relative" style={{ minHeight: "400px" }}>
                 {places.filter(p => p.latitude && p.longitude).length === 0 ? (
@@ -948,7 +994,8 @@ function ScraperApp() {
                 ) : (
                   <>
                     <div ref={mapRef} className="w-full h-full" style={{ minHeight: "400px" }} />
-                    <div className="absolute bottom-2 left-2 z-[1000] bg-[#161b22]/90 border border-[#30363d] rounded px-2 py-1 text-xs text-[#8b949e]">
+                    <div className="absolute bottom-2 left-2 z-[1000] bg-[#161b22]/90
+                                    border border-[#30363d] rounded px-2 py-1 text-xs text-[#8b949e]">
                       {places.filter(p => p.latitude && p.longitude).length} marker
                     </div>
                   </>
@@ -956,6 +1003,7 @@ function ScraperApp() {
               </div>
             )}
 
+            {/* Pagination */}
             {viewMode === "table" && totalTablePages > 1 && (
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-[#30363d]">
                 <span className="text-xs text-[#8b949e]">
@@ -991,6 +1039,7 @@ function ScraperApp() {
   );
 }
 
+// ── Wrap dengan ErrorBoundary ─────────────────────────────────────────────────
 export default function Home() {
   return (
     <ErrorBoundary>
