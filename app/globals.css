@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.card {
+  background: rgba(22, 27, 34, 0.96);
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.input {
+  width: 100%;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #e6edf3;
+  border-radius: 8px;
+  padding: 0.625rem 0.75rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.input:focus {
+  border-color: #58a6ff;
+}
+
+.label {
+  display: block;
+  font-size: 0.7rem;
+  color: #8b949e;
+  margin-bottom: 0.4rem;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-blue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #1f6feb 0%, #0d6ad8 100%);
+  color: white;
+  border-color: rgba(31, 111, 235, 0.7);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.btn-secondary {
+  background: #21262d;
+  color: #c9d1d9;
+  border-color: #30363d;
+}
+
+.btn-secondary:hover {
+  background: #30363d;
+}
+
+.btn-blue {
+  background: rgba(31, 111, 235, 0.12);
+  color: #58a6ff;
+  border-color: rgba(31, 111, 235, 0.35);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

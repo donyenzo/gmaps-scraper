@@ -1,0 +1,47 @@
+{
+  "_comment": "Ganti api_keys dengan key asli Anda dari serper.dev",
+
+  "api_keys": [
+    "API_KEY_1_ANDA",
+    "API_KEY_2_ANDA",
+    "API_KEY_3_ANDA",
+    "API_KEY_4_ANDA",
+    "API_KEY_5_ANDA"
+  ],
+
+  "gl": "id",
+  "hl": "id",
+  "num": 20,
+  "concurrency": 5,
+  "delay": 0.3,
+  "output": "hasil_scraping",
+  "format": "all",
+
+  "jobs": [
+    {
+      "query": "restoran padang",
+      "location": "Jakarta Selatan, Indonesia",
+      "max_pages": 5
+    },
+    {
+      "query": "klinik gigi",
+      "location": "Bandung, Indonesia",
+      "max_pages": 3
+    },
+    {
+      "query": "hotel bintang 4",
+      "location": "Bali, Indonesia",
+      "max_pages": 5
+    },
+    {
+      "query": "bengkel motor Honda",
+      "location": "Surabaya, Indonesia",
+      "max_pages": 3
+    },
+    {
+      "query": "apotek 24 jam",
+      "location": "Yogyakarta, Indonesia",
+      "max_pages": 3
+    }
+  ]
+}
