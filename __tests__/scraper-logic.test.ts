@@ -9,13 +9,16 @@ import {
   LIMITS, CACHE_TTL_MS,
 } from "../lib/scraper-logic";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KeyRotator
+// ─────────────────────────────────────────────────────────────────────────────
 describe("KeyRotator", () => {
   it("round-robins through keys", () => {
     const r = new KeyRotator(["a", "b", "c"]);
     expect(r.next()).toBe("a");
     expect(r.next()).toBe("b");
     expect(r.next()).toBe("c");
-    expect(r.next()).toBe("a");
+    expect(r.next()).toBe("a"); // wrap
   });
 
   it("skips failed keys", () => {
@@ -43,10 +46,11 @@ describe("KeyRotator", () => {
     expect(r.activeCount).toBe(0);
   });
 
+  // FIX VERIFICATION: idx tidak overflow
   it("idx resets before overflow (mod 1_000_000)", () => {
     const r = new KeyRotator(["only"]);
     for (let i = 0; i < 1_000_005; i++) r.next();
-    expect(() => r.next()).not.toThrow();
+    expect(() => r.next()).not.toThrow(); // seharusnya tetap berjalan
   });
 
   it("throws on empty keys array", () => {
@@ -54,6 +58,9 @@ describe("KeyRotator", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Semaphore
+// ─────────────────────────────────────────────────────────────────────────────
 describe("Semaphore", () => {
   it("limits concurrency to n", async () => {
     const sem = new Semaphore(2);
@@ -88,6 +95,9 @@ describe("Semaphore", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// validate()
+// ─────────────────────────────────────────────────────────────────────────────
 const validInput = {
   jobs: [{ query: "restoran", location: "Jakarta", maxPages: 3 }],
   apiKeys: ["key123"],
@@ -143,9 +153,10 @@ describe("validate()", () => {
   });
 
   it("rejects invalid gl (not 2-letter code)", () => {
-    expect(validate({ ...validInput, gl: "xyz" }).ok).toBe(false);
-    expect(validate({ ...validInput, gl: "i"   }).ok).toBe(false);
-    expect(validate({ ...validInput, gl: "id1" }).ok).toBe(false);
+    expect(validate({ ...validInput, gl: "xyz" }).ok).toBe(false);  // 3 huruf
+    expect(validate({ ...validInput, gl: "i"   }).ok).toBe(false);  // 1 huruf
+    expect(validate({ ...validInput, gl: "id1" }).ok).toBe(false);  // ada angka
+    // Catatan: "ID" (uppercase) DITERIMA karena kode menormalisasi ke lowercase.
     expect(validate({ ...validInput, gl: "ID"  }).ok).toBe(true);
   });
 
@@ -160,6 +171,9 @@ describe("validate()", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// parsePlaceItem() + dedupKey()
+// ─────────────────────────────────────────────────────────────────────────────
 const rawItem = {
   title:        "Restoran Padang Sederhana",
   address:      "Jl. Sudirman No. 45, Jakarta",
@@ -226,7 +240,7 @@ describe("dedupKey()", () => {
     expect(dedupKey(p)).toBe("cid:cid999");
   });
 
-  it("falls back to title+address (NOT just title)", () => {
+  it("FIX: falls back to title+address (NOT just title)", () => {
     const p1 = parsePlaceItem(
       { ...rawItem, placeId: "", cid: "", title: "RM Padang", address: "Jl. Sudirman, Jakarta" },
       "q", "loc"
@@ -235,10 +249,14 @@ describe("dedupKey()", () => {
       { ...rawItem, placeId: "", cid: "", title: "RM Padang", address: "Jl. Raya, Surabaya" },
       "q", "loc"
     );
+    // Kunci berbeda meski nama sama — FIX dari bug sebelumnya
     expect(dedupKey(p1)).not.toBe(dedupKey(p2));
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache
+// ─────────────────────────────────────────────────────────────────────────────
 describe("Cache (cacheGet / cacheSet)", () => {
   beforeEach(() => cacheClear());
 

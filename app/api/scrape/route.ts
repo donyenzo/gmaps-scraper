@@ -19,7 +19,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 function authenticate(req: NextRequest): boolean {
   const secret = process.env.SCRAPER_AUTH_TOKEN?.trim();
-  if (!secret) { console.warn("[SECURITY] SCRAPER_AUTH_TOKEN tidak di-set!"); return true; }
+  if (!secret) { console.error("[SECURITY] SCRAPER_AUTH_TOKEN tidak di-set — menolak akses!"); return false; }
   const header = req.headers.get("authorization") ?? "";
   const token  = header.startsWith("Bearer ") ? header.slice(7).trim() : header.trim();
   return timingSafeEqual(token, secret);
@@ -62,6 +62,7 @@ async function scrapeJob(
   let subtotal = 0;
 
   for (let page = 0; page < job.maxPages; page++) {
+    // FIX: periksa deadline SEBELUM tiap halaman, bukan sesudah
     const remaining = deadlineAt - Date.now();
     if (remaining < 3_000) {
       send({
@@ -105,6 +106,7 @@ async function scrapeJob(
       break;
     }
 
+    // Deduplicate & parse — FIX: pakai dedupKey() yang menyertakan address sebagai fallback
     const fresh: Place[] = [];
     for (const item of result.places) {
       const p   = parsePlaceItem(item, job.query, job.location);
@@ -125,7 +127,7 @@ async function scrapeJob(
     if (result.fromCache)
       send({ type: "info", msg: `📦 "${job.query}" halaman ${page + 1} dari cache` });
 
-    if (result.places.length < num) break;
+    if (result.places.length < num) break; // halaman terakhir
     await new Promise(r => setTimeout(r, 350));
   }
 
@@ -167,6 +169,7 @@ export async function POST(req: NextRequest) {
   if (!allKeys.length)
     return Response.json({ error: "Tidak ada API key yang valid." }, { status: 400 });
 
+  // FIX: Vercel timeout deadline — set SCRAPER_TIMEOUT_MS=8000 untuk Hobby plan
   const TIMEOUT_MS = parseInt(process.env.SCRAPER_TIMEOUT_MS ?? "55000");
   const deadlineAt = Date.now() + TIMEOUT_MS;
 
@@ -174,6 +177,7 @@ export async function POST(req: NextRequest) {
   const seen    = new Set<string>();
   const enc     = new TextEncoder();
 
+  // FIX: concurrency = min(jobs, keys, 5) — manfaatkan semua key secara paralel
   const CONCURRENCY = Math.min(jobs.length, allKeys.length, 5);
   const sem = new Semaphore(CONCURRENCY);
 
@@ -187,10 +191,11 @@ export async function POST(req: NextRequest) {
           type:        "init",
           totalJobs:   jobs.length,
           keyCount:    allKeys.length,
-          concurrency: CONCURRENCY,
+          concurrency: CONCURRENCY,                          // FIX: informasikan ke UI
           timeoutMs:   TIMEOUT_MS,
         });
 
+        // FIX: Promise.all + Semaphore — semua job jalan PARALEL
         await Promise.all(
           jobs.map(async (job) => {
             const release = await sem.acquire();
