@@ -1,7 +1,2 @@
-import { defineConfig } from "next";
-
-const nextConfig = {
-  reactStrictMode: true,
-};
-
-export default defineConfig(nextConfig);
+// DISABLED - Gunakan next.config.js sebagai gantinya
+// File ini tidak lagi digunakan
