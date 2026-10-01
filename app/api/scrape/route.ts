@@ -47,6 +47,22 @@ function getClientIp(req: NextRequest): string {
     ?? "unknown";
 }
 
+function getServerKeys(): string[] {
+  const direct = (process.env.SERPER_API_KEYS ?? "")
+    .split(",")
+    .map(k => k.trim())
+    .filter(Boolean);
+
+  const indexed: string[] = [];
+  for (let i = 1; i <= 20; i++) {
+    const value = process.env[`SERPER_API_KEYS_${i}`]?.trim();
+    if (value) indexed.push(value);
+  }
+
+  return [...new Set([...direct, ...indexed])]
+    .filter(k => k.length > 0 && k.length <= LIMITS.MAX_KEY_LEN);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SCRAPE ONE JOB (untuk dijalankan paralel)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -62,7 +78,6 @@ async function scrapeJob(
   let subtotal = 0;
 
   for (let page = 0; page < job.maxPages; page++) {
-    // FIX: periksa deadline SEBELUM tiap halaman, bukan sesudah
     const remaining = deadlineAt - Date.now();
     if (remaining < 3_000) {
       send({
@@ -106,7 +121,6 @@ async function scrapeJob(
       break;
     }
 
-    // Deduplicate & parse — FIX: pakai dedupKey() yang menyertakan address sebagai fallback
     const fresh: Place[] = [];
     for (const item of result.places) {
       const p   = parsePlaceItem(item, job.query, job.location);
@@ -127,7 +141,7 @@ async function scrapeJob(
     if (result.fromCache)
       send({ type: "info", msg: `📦 "${job.query}" halaman ${page + 1} dari cache` });
 
-    if (result.places.length < num) break; // halaman terakhir
+    if (result.places.length < num) break;
     await new Promise(r => setTimeout(r, 350));
   }
 
@@ -135,9 +149,6 @@ async function scrapeJob(
   return subtotal;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN HANDLER
-// ═══════════════════════════════════════════════════════════════════════════
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
 
@@ -161,15 +172,12 @@ export async function POST(req: NextRequest) {
 
   const { jobs, apiKeys: clientKeys, gl, hl, num } = validation.data;
 
-  const envKeys = (process.env.SERPER_API_KEYS ?? "")
-    .split(",").map(k => k.trim())
-    .filter(k => k.length > 0 && k.length <= LIMITS.MAX_KEY_LEN);
+  const envKeys = getServerKeys();
   const allKeys = [...new Set([...envKeys, ...clientKeys])];
 
   if (!allKeys.length)
     return Response.json({ error: "Tidak ada API key yang valid." }, { status: 400 });
 
-  // FIX: Vercel timeout deadline — set SCRAPER_TIMEOUT_MS=8000 untuk Hobby plan
   const TIMEOUT_MS = parseInt(process.env.SCRAPER_TIMEOUT_MS ?? "55000");
   const deadlineAt = Date.now() + TIMEOUT_MS;
 
@@ -177,7 +185,6 @@ export async function POST(req: NextRequest) {
   const seen    = new Set<string>();
   const enc     = new TextEncoder();
 
-  // FIX: concurrency = min(jobs, keys, 5) — manfaatkan semua key secara paralel
   const CONCURRENCY = Math.min(jobs.length, allKeys.length, 5);
   const sem = new Semaphore(CONCURRENCY);
 
@@ -191,11 +198,10 @@ export async function POST(req: NextRequest) {
           type:        "init",
           totalJobs:   jobs.length,
           keyCount:    allKeys.length,
-          concurrency: CONCURRENCY,                          // FIX: informasikan ke UI
+          concurrency: CONCURRENCY,
           timeoutMs:   TIMEOUT_MS,
         });
 
-        // FIX: Promise.all + Semaphore — semua job jalan PARALEL
         await Promise.all(
           jobs.map(async (job) => {
             const release = await sem.acquire();
